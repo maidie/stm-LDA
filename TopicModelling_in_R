@@ -1,0 +1,572 @@
+library(bibliometrix)
+library(ggplot2)
+library(Matrix)
+library(textmineR)
+library(topicmodels)
+library(NLP)
+library(tm)
+library(tidyr)
+library(SnowballC)
+library(RColorBrewer)
+library(tidyverse)
+library(openxlsx)
+library(textstem)
+library(generics)
+library(quanteda)
+
+data<-readFiles("./savedrecs.bib")
+datadf <- convert2df(data,dbsource = "wos",format = "bibtex")
+
+# Descriptive Analysis
+## Main findings about the collection
+
+results <- biblioAnalysis(datadf)
+summary(results, k=20, pause=FALSE)
+plot(results)
+
+Title <- datadf$TI
+KeyWord <- datadf$DE
+Abstract <- datadf$AB
+TopicsSC <- datadf$SC
+TopicsWoS <- datadf$WC
+
+write.table(TopicsSC, file = "SC_topics.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+TopicsSC <- read.delim("SC_topics.txt", sep = "\t")   # read file with WoS topics
+
+TopicsSC <- as.matrix(TopicsSC)
+
+df <- data.frame(Title,KeyWord, Abstract, TopicsSC, TopicsWoS) %>% 
+  unite(doc, c(Title, KeyWord, Abstract), sep = " ", remove = FALSE)
+
+df <- df %>% mutate(doc_num = row_number()) # add number to document
+
+df <- df[, c(8, 1:7)]   # reorder
+
+df$doc <- removePunctuation(df$doc, 
+                            preserve_intra_word_contractions = TRUE,
+                            preserve_intra_word_dashes = TRUE)
+
+#AU Authors
+#TI Document Title
+#SO Publication name (Source) - Journal
+#JI ISO Source Abbreviation - Journal(skraćeno)
+#AB Abstract
+#DE Authors' Keywords
+#ID Keywords associated by SCOPUS or WoS database
+#LA Language
+#DT Document Type
+#DT2 Document Type - WoS query
+#TC Times Cited
+#CR Cited References
+#C1 Affiliation
+#DI DOI
+#PA Address
+#AR Article-Number
+#BE Editor
+#FU Funding-Acknowledgement
+#FX Funding-Text
+#BN ISBN
+#SN ISSN
+#PN Number
+#PP Pages
+#PU Publisher
+#VL Volume
+#PY Year
+#UT Unique Article Identifier
+#NR Number of Cited References
+#SC Subject Category (Research Areas)
+#U2 Usage-Count-Last-180-days
+#WC WoS Categories
+#EM Author E-mail
+#SE Series
+#GA Doc-Delivery-Number
+#BO Booktitle
+#RP Reprint Address
+#DB Database
+#AU_UN University of Affiliation for each co-author and the corresponding author
+#AU1_UN University of Affiliation for each co-author and the corresponding author
+#SR_FULL Short Full-Reference
+#SR Short tag of the document (as used in reference lists)
+
+
+# Create corpus from Title, Abstract, Keyword
+
+corpus <- VCorpus(VectorSource(df$doc))
+
+print(corpus)
+summary(corpus)
+inspect(head(corpus,3))
+
+# Clean corpus
+
+corpus <- tm_map(corpus,content_transformer(tolower))
+corpus <- tm_map(corpus, removeNumbers)
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corpus <- tm_map(corpus, toSpace, "\\(" ) 
+corpus <- tm_map(corpus, toSpace, "\\)" ) 
+corpus <- tm_map(corpus, toSpace, "\\=" ) 
+corpus <- tm_map(corpus, toSpace, "\\.") 
+corpus <- tm_map(corpus, toSpace, "\\,")
+corpus <- tm_map(corpus, toSpace, "\\:")
+corpus <- tm_map(corpus, toSpace, "\\;")
+corpus <- tm_map(corpus, toSpace, "\\?")
+corpus <- tm_map(corpus, toSpace, "\\!")
+corpus <- tm_map(corpus, toSpace, "\\'") 
+corpus <- tm_map(corpus, toSpace, "\\-")
+corpus <- tm_map(corpus, toSpace, "\\_")
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, removeWords, c("0o", "0s", "3a", "3b", "3d", "6b", "6o", "a", "a1", "a2", "a3", "a4", "ab", "able", "about", "above", "abst", "ac", "accordance", "according", "accordingly", "across", "act", "actually", "ad", "added", "adj", "ae", "af", "affected", "affecting", "affects", "after", "afterwards", "ag", "again", "against", "ah", "ain", "ain't", "aj", "al", "all", "allow", "allows", "almost", "alone", "along", "already", "also", "although", "always", "am", "among", "amongst", "amoungst", "amount", "an", "and", "announce", "another", "any", "anybody", "anyhow", "anymore", "anyone", "anything", "anyway", "anyways", "anywhere", "ao", "ap", "apart", "apparently", "appear", "appreciate", "appropriate", "approximately", "ar", "are", "aren", "arent", "aren't", "arise", "around", "as", "a's", "aside", "ask", "asking", "associated", "at", "au", "auth", "av", "available", "aw", "away", "awfully", "ax", "ay", "az", "b", "b1", "b2", "b3", "ba", "back", "bc", "bd", "be", "became", "because", "become", "becomes", "becoming", "been", "before", "beforehand", "begin", "beginning", "beginnings", "begins", "behind", "being", "believe", "below", "beside", "besides", "best", "better", "between", "beyond", "bi", "bill", "biol", "bj", "bk", "bl", "bn", "both", "bottom", "bp", "br", "brief", "briefly", "bs", "bt", "bu", "but", "bx", "by", "c", "c1", "c2", "c3", "ca", "call", "came", "can", "cannot", "cant", "can't", "cause", "causes", "cc", "cd", "ce", "certain", "certainly", "cf", "cg", "ch", "changes", "ci", "cit", "cj", "cl", "clearly", "cm", "c'mon", "cn", "co", "com", "come", "comes", "con", "concerning", "consequently", "consider", "considering", "contain", "containing", "contains", "corresponding", "could", "couldn", "couldnt", "couldn't", "course", "cp", "cq", "cr", "cry", "cs", "c's", "ct", "cu", "currently", "cv", "cx", "cy", "cz", "d", "d2", "da", "date", "dc", "dd", "de", "definitely", "describe", "described", "despite", "detail", "df", "di", "did", "didn", "didn't", "different", "dj", "dk", "dl", "do", "does", "doesn", "doesn't", "doing", "don", "done", "don't", "down", "downwards", "dp", "dr", "ds", "dt", "du", "due", "during", "dx", "dy", "e", "e2", "e3", "ea", "each", "ec", "ed", "edu", "ee", "ef", "effect", "eg", "ei", "eight", "eighty", "either", "ej", "el", "eleven", "else", "elsewhere", "em", "empty", "en", "end", "ending", "enough", "entirely", "eo", "ep", "eq", "er", "es", "especially", "est", "et", "et-al", "etc", "eu", "ev", "even", "ever", "every", "everybody", "everyone", "everything", "everywhere", "ex", "exactly", "example", "except", "ey", "f", "f2", "fa", "far", "fc", "few", "ff", "fi", "fifteen"))
+corpus <- tm_map(corpus, removeWords, c("fifth", "fify", "fill", "find", "fire", "first", "five", "fix", "fj", "fl", "fn", "fo", "followed", "following", "follows", "for", "former", "formerly", "forth", "forty", "found", "four", "fr", "from", "front", "fs", "ft", "fu", "full", "further", "furthermore", "fy", "g", "ga", "gave", "ge", "get", "gets", "getting", "gi", "give", "given", "gives", "giving", "gj", "gl", "go", "goes", "going", "gone", "got", "gotten", "gr", "greetings", "gs", "gy", "h", "h2", "h3", "had", "hadn", "hadn't", "happens", "hardly", "has", "hasn", "hasnt", "hasn't", "have", "haven", "haven't", "having", "he", "hed", "he'd", "he'll", "hello", "help", "hence", "her", "here", "hereafter", "hereby", "herein", "heres", "here's", "hereupon", "hers", "herself", "hes", "he's", "hh", "hi", "hid", "him", "himself", "his", "hither", "hj", "ho", "home", "hopefully", "how", "howbeit", "however", "how's", "hr", "hs", "http", "hu", "hundred", "hy", "i", "i2", "i3", "i4", "i6", "i7", "i8", "ia", "ib", "ibid", "ic", "id", "i'd", "ie", "if", "ig", "ignored", "ih", "ii", "ij", "il", "i'll", "im", "i'm", "immediate", "immediately", "importance", "important", "in", "inasmuch", "inc", "indeed", "index", "indicate", "indicated", "indicates", "information", "inner", "insofar", "instead", "interest", "into", "invention", "inward", "io", "ip", "iq", "ir", "is", "isn", "isn't", "it", "itd", "it'd", "it'll", "its", "it's", "itself", "iv", "i've", "ix", "iy", "iz", "j", "jj", "jr", "js", "jt", "ju", "just", "k", "ke", "keep", "keeps", "kept", "kg", "kj", "km", "know", "known", "knows", "ko", "l", "l2", "la", "largely", "last", "lately", "later", "latter", "latterly", "lb", "lc", "le", "least", "les", "less", "lest", "let", "lets", "let's", "lf", "like", "liked", "likely", "line", "little", "lj", "ll", "ll", "ln", "lo", "look", "looking", "looks", "los", "lr", "ls", "lt", "ltd", "m", "m2", "ma", "made", "mainly", "make", "makes", "many", "may", "maybe", "me", "mean", "means", "meantime", "meanwhile", "merely", "mg", "might", "mightn", "mightn't", "mill", "million", "mine", "miss", "ml", "mn", "mo", "more", "moreover", "most", "mostly", "move", "mr", "mrs", "ms", "mt", "mu", "much", "mug", "must", "mustn", "mustn't", "my", "myself", "n", "n2", "na", "name", "namely", "nay", "nc", "nd", "ne", "near", "nearly", "necessarily", "necessary", "need", "needn", "needn't", "needs", "neither", "never", "nevertheless", "new", "next", "ng", "ni", "nine", "ninety", "nj", "nl", "nn", "no", "nobody", "non", "none", "nonetheless", "noone", "nor", "normally", "nos", "not", "noted", "nothing", "novel", "now", "nowhere", "nr", "ns", "nt", "ny", "o", "oa", "ob", "obtain", "obtained", "obviously", "oc", "od", "of", "off", "often", "og", "oh", "oi", "oj", "ok", "okay", "ol", "old", "om", "omitted", "on", "once", "one", "ones", "only", "onto", "oo", "op", "oq", "or", "ord", "os", "ot", "other", "others", "otherwise", "ou", "ought", "our", "ours", "ourselves", "out", "outside", "over", "overall", "ow", "owing", "own", "ox", "oz", "p", "p1", "p2", "p3", "page", "pagecount", "pages", "par", "part", "particular", "particularly", "pas", "past", "pc", "pd", "pe", "per", "perhaps", "pf", "ph", "pi", "pj", "pk", "pl", "placed", "please", "plus", "pm", "pn", "po", "poorly", "possible", "possibly", "potentially", "pp", "pq", "pr", "predominantly", "present", "presumably", "previously", "primarily", "probably", "promptly", "proud", "provides", "ps", "pt", "pu", "put", "py", "q", "qj", "qu", "que", "quickly", "quite", "qv", "r", "r2", "ra", "ran", "rather", "rc", "rd", "re", "readily", "really", "reasonably", "recent", "recently", "ref", "refs", "regarding", "regardless", "regards", "related", "relatively", "research", "research-articl", "respectively", "resulted", "resulting", "results", "rf", "rh", "ri", "right", "rj", "rl", "rm", "rn", "ro", "rq", "rr", "rs", "rt", "ru", "run", "rv", "ry", "s", "s2", "sa", "said", "same", "saw", "say", "saying", "says", "sc", "sd"))
+corpus <- tm_map(corpus, removeWords, c("se", "sec", "second", "secondly", "section", "see", "seeing", "seem", "seemed", "seeming", "seems", "seen", "self", "selves", "sensible", "sent", "serious", "seriously", "seven", "several", "sf", "shall", "shan", "shan't", "she", "shed", "she'd", "she'll", "shes", "she's", "should", "shouldn", "shouldn't", "should've", "show", "showed", "shown", "showns", "shows", "si", "side", "significant", "significantly", "similar", "similarly", "since", "sincere", "six", "sixty", "sj", "sl", "slightly", "sm", "sn", "so", "some", "somebody", "somehow", "someone", "somethan", "something", "sometime", "sometimes", "somewhat", "somewhere", "soon", "sorry", "sp", "specifically", "specified", "specify", "specifying", "sq", "sr", "ss", "st", "still", "stop", "strongly", "sub", "substantially", "successfully", "such", "sufficiently", "suggest", "sup", "sure", "sy", "system", "sz", "t", "t1", "t2", "t3", "take", "taken", "taking", "tb", "tc", "td", "te", "tell", "ten", "tends", "tf", "th", "than", "thank", "thanks", "thanx", "that", "that'll", "thats", "that's", "that've", "the", "their", "theirs", "them", "themselves", "then", "thence", "there", "thereafter", "thereby", "thered", "therefore", "therein", "there'll", "thereof", "therere", "theres", "there's", "thereto", "thereupon", "there've", "these", "they", "theyd", "they'd", "they'll", "theyre", "they're", "they've", "thickv", "thin", "think", "third", "this", "thorough", "thoroughly", "those", "thou", "though", "thoughh", "thousand", "three", "throug", "through", "throughout", "thru", "thus", "ti", "til", "tip", "tj", "tl", "tm", "tn", "to", "together", "too", "took", "top", "toward", "towards", "tp", "tq", "tr", "tried", "tries", "truly", "try", "trying", "ts", "t's", "tt", "tv", "twelve", "twenty", "twice", "two", "tx", "u", "u201d", "ue", "ui", "uj", "uk", "um", "un", "under", "unfortunately", "unless", "unlike", "unlikely", "until", "unto", "uo", "up", "upon", "ups", "ur", "us", "use", "used", "useful", "usefully", "usefulness", "uses", "using", "usually", "ut", "v", "va", "value", "various", "vd", "ve", "ve", "very", "via", "viz", "vj", "vo", "vol", "vols", "volumtype", "vq", "vs", "vt", "vu", "w", "wa", "want", "wants", "was", "wasn", "wasnt", "wasn't", "way", "we", "wed", "we'd", "welcome", "well", "we'll", "well-b", "went", "were", "we're", "weren", "werent", "weren't", "we've", "what", "whatever", "what'll", "whats", "what's", "when", "whence", "whenever", "when's", "where", "whereafter", "whereas", "whereby", "wherein", "wheres", "where's", "whereupon", "wherever", "whether", "which", "while", "whim", "whither", "who", "whod", "whoever", "whole", "who'll", "whom", "whomever", "whos", "who's", "whose", "why", "why's", "wi", "widely", "will", "willing", "wish", "with", "within", "without", "wo", "won", "wonder", "wont", "won't", "words", "world", "would", "wouldn", "wouldnt", "wouldn't", "www", "x", "x1", "x2", "x3", "xf", "xi", "xj", "xk", "xl", "xn", "xo", "xs", "xt", "xv", "xx", "y", "y2", "yes", "yet", "yj", "yl", "you", "youd", "you'd", "you'll", "your", "youre", "you're", "yours", "yourself", "yourselves", "you've", "yr", "ys", "yt", "z", "zero", "zi", "zz"))
+corpus <- tm_map(corpus, stripWhitespace)
+
+library(textstem)
+corpus <- tm_map(corpus, content_transformer(lemmatize_words))
+corpus <- tm_map(corpus, content_transformer(lemmatize_strings))
+
+corpus <- tm_map(corpus, removeWords, c("social","network","study"))
+corpus <- tm_map(corpus, stripWhitespace)
+
+print(corpus[[555]]$content)
+inspect(head(corpus,10))
+
+# Create DTM
+
+dtm <- DocumentTermMatrix(corpus)
+dim(dtm)
+
+#remove rarley terms by enforcing bounds when creating the DTM
+
+sparse_dtm <-DocumentTermMatrix(corpus, control=list(bounds = list(global = c(2,3664))))  # at least 2 docs is term
+sparse_dtm_matrix <- as.matrix(sparse_dtm)
+
+# inspection if is in table any row with 0 and remove them
+o <- rowSums(sparse_dtm_matrix)
+# table(rowSums(sparse_dtm_matrix)==0)
+o <- data.frame(o)
+o <- o %>% mutate(ord = row_number())
+o[o$o == 0,]
+
+sparse_dtm_matrix <- sparse_dtm_matrix[-c(1096,2209), ]
+dim(sparse_dtm_matrix)
+
+df1 <- df[-c(1096,2209), ] # remove rows from dataset
+
+rowSum <- apply(sparse_dtm , 1, sum)           # OK
+sparse_dtm_sub <- sparse_dtm[rowSum> 0, ]      # OK
+dim(sparse_dtm_sub)
+
+# Frequency of words
+
+library(tidytext)
+
+dtm_tidy <- tidy(sparse_dtm)  #ispraviti u sparse_dtm_sub
+
+dtm_tidy %>%
+  count(term, sort=TRUE) %>%
+  filter(n>500) %>%
+  mutate(word=reorder(term,n)) %>%
+  ggplot(aes(x=word,y=n)) +
+  geom_col(fill="aliceblue", col="cadetblue") +
+  xlab(NULL) + 
+  coord_flip() +
+  ggtitle("Word frequencies (>500)") +
+  theme(plot.title = element_text(size=10, face = "bold")) +
+  theme_bw()
+dtm_tidy
+
+# Wordcloud
+
+doc_words <- dtm_tidy %>%
+  count(term, sort = TRUE) %>%
+  filter(n>500)
+doc_words
+wordcloud2::wordcloud2(data = doc_words, size=0.4)
+
+# Term frequency
+
+terms <- dtm_tidy %>%
+  count(term, sort = TRUE)
+
+#******************************************************************************* 
+
+terms$var <- 1
+totalterms <- terms %>%
+  group_by(var) %>%
+  summarize(total=sum(n))
+terms_total <- left_join(terms,totalterms)
+terms_total
+
+ggplot(terms_total, aes(n/total)) +
+  geom_histogram(fill="antiquewhite1", color="lightcoral", show.legend = FALSE) +
+  xlim(NA,0.010) +
+  ggtitle("Term frequency distribution")
+
+freq_by_rank <- terms_total %>%  #Zipf's law - relation between a term's freq and its rank
+  mutate(rank=row_number()) %>%
+  mutate(tfreq=n/total)
+freq_by_rank
+
+ggplot(freq_by_rank, aes(x=rank, y=tfreq)) +
+  geom_line(size=1, col="red", alpha=0.8, show.legend = FALSE) +
+  scale_y_log10() +
+  ggtitle("Visualization of Zipf's law")
+
+# explore tf-idf
+
+## Convert dtm to a list of text
+dtm2list <- apply(sparse_dtm_sub, 1, function(x) {
+  paste(rep(names(x), x), collapse=" ")
+})
+
+## convert to a Corpus
+sub_corpus <- VCorpus(VectorSource(dtm2list))
+
+term_tidy <- tidy(sub_corpus) %>%
+  unnest_tokens(word, text) %>%
+  count(id,word, sort = TRUE)
+
+library(drlib)
+
+term_tf_idf <- term_tidy %>%
+  count(id, word, sort = TRUE) %>%
+  bind_tf_idf(word, id, n) %>%
+  arrange(-tf_idf) %>%
+  group_by(id) %>%
+  top_n(5) %>%
+  ungroup
+
+write.csv(term_tf_idf,file = paste("TF-IDF.csv"))
+
+########################################################################
+
+# Implement topic modelling
+
+#########################################################################
+
+library(stm)
+library(quanteda)
+
+term_tidy_dfm <- tidy(sub_corpus) %>%
+  unnest_tokens(word, text) %>%
+  count(id, word, sort = TRUE) %>%
+  cast_dfm(id, word, n)
+
+LDAtopic.model <- stm(term_tidy_dfm, K = 25, init.type = "LDA")
+
+summary(LDAtopic.model)
+
+LDA_td_beta <- tidy(LDAtopic.model)
+
+LDA_td_beta %>%
+  group_by(topic) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term,beta, fill=topic)) +
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~topic, ncol = 5, scales = "free", shrink = TRUE) +
+  coord_flip()
+
+
+LDA_td_gamma <- tidy(LDAtopic.model, matrix = "gamma", document_names = rownames(term_tidy_dfm))
+
+ggplot(LDA_td_gamma, aes(gamma, fill = as.factor(topic))) +
+  geom_histogram(alpha=0.8, show.legend = FALSE) + 
+  facet_wrap(~ topic, ncol = 5) +
+  stat_bin(binwidth = 0.05) +
+  labs(title = "Distribution of document probabilities for each topic",
+       y = "Number of documents", x = expression(gamma))
+
+
+# OR ANOTHER WISUALIZATION
+
+library(ggthemes)
+library(scales)
+
+top_terms <- LDA_td_beta %>%
+  arrange(beta) %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  arrange(-beta) %>%
+  select(topic, term) %>%
+  summarise(terms = list(term)) %>%
+  mutate(terms = map(terms, paste, collapse = ", ")) %>% 
+  unnest()
+
+gamma_terms <- LDA_td_gamma %>%
+  group_by(topic) %>%
+  summarise(gamma = mean(gamma)) %>%
+  arrange(desc(gamma)) %>%
+  left_join(top_terms, by = "topic") %>%
+  mutate(topic = paste0("Topic ", topic),
+         topic = reorder(topic, gamma))
+
+gamma_terms %>%
+  top_n(25, gamma) %>%
+  ggplot(aes(topic, gamma, label = terms, fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(hjust = 0, nudge_y = 0.0005, size = 3) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0, 0.15),
+                     labels = percent_format()) +
+  theme_tufte(ticks = FALSE) +
+  theme(plot.title = element_text(size = 10),
+        plot.subtitle = element_text(size = 13)) +
+  labs(x = NULL, y = expression(gamma),
+       title = "25 topics by prevalence in the WoS corpus",
+       subtitle = "With the top 5 words that contribute to each topic")
+
+library(knitr)
+
+gamma_terms %>%
+  select(topic, gamma, terms) %>%
+  kable(digits = 3, 
+        col.names = c("Topic", "Expected topic proportion", "Top 10 terms"))
+
+####################################
+#
+# EVALUATION
+#
+####################################
+#term_tidy_dfm
+
+# train model with different number of topics
+
+library(stm)
+library(furrr)
+plan(multiprocess)
+
+many_models <- data_frame(K=c(5,12,25,50,100)) %>%
+  mutate(topic_model = future_map(K, ~ stm(term_tidy_dfm, K=. , seed = 12345, max.em.its = 50, init.type = "LDA")))
+
+
+# explore how many topics are appropriate
+
+heldout <- make.heldout(term_tidy_dfm)
+
+documents <- heldout$documents
+vocab <- heldout$vocab
+
+K <- c(5,12,25,50,100)
+
+heldout_many_models <- searchK(documents, vocab, K, seed = 8458159, init.type = "LDA")
+
+plot.searchK(heldout_many_models)
+
+#eval.heldout(heldout_many_models$results, heldout$missing)
+
+plot.searchK(heldout_many_models)
+
+par(mfrow=c(2,2))
+qplot(heldout_many_models$results$K, heldout_many_models$results$exclus, geom=c("point", "smooth"))
+qplot(heldout_many_models$results$K, heldout_many_models$results$heldout, geom=c("point", "smooth"))
+qplot(heldout_many_models$results$K, heldout_many_models$results$semcoh, geom=c("point", "smooth"))
+qplot(heldout_many_models$results$K, heldout_many_models$results$em.its, geom=c("point", "smooth"))
+par(mfrow=c(1,1))
+
+
+
+# similar to searchK()
+
+library(purrr)
+
+k_resultat <- many_models %>%
+  mutate(exclusivity = map(topic_model, exclusivity),
+         semantic_coherence = map(topic_model, semanticCoherence, term_tidy_dfm),
+         eval_heldout = map(topic_model, eval.heldout, heldout$missing),
+         residual = map(topic_model, checkResiduals, term_tidy_dfm),
+         bound =  map_dbl(topic_model, function(x) max(x$convergence$bound)),
+         lfact = map_dbl(topic_model, function(x) lfactorial(x$settings$dim$K)),
+         lbound = bound + lfact,
+         iterations = map_dbl(topic_model, function(x) length(x$convergence$bound)))
+
+k_resultat
+
+k_resultat %>%
+  transmute(K,
+            `Lower bound` = lbound,
+            Residuals = map_dbl(residual, "dispersion"),
+            `Semantic coherence` = map_dbl(semantic_coherence, mean),
+            `Held-out likelihood` = map_dbl(eval_heldout, "expected.heldout")) %>%
+  gather(Metric, Value, -K) %>%
+  ggplot(aes(K, Value, color = Metric)) +
+  geom_line(size = 1.5, alpha = 0.7, show.legend = FALSE) +
+  facet_wrap(~Metric, scales = "free_y") +
+  labs(x = "K (number of topics)",
+       y = NULL,
+       title = "Model diagnostics by number of topics" )
+
+
+k_resultat %>%
+  select(K, exclusivity, semantic_coherence) %>%
+  filter(K %in% c(5, 12, 25,50,100)) %>%
+  unnest() %>%
+  mutate(K = as.factor(K)) %>%
+  ggplot(aes(semantic_coherence, exclusivity, color = K)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(x = "Semantic coherence",
+       y = "Exclusivity",
+       title = "Comparing exclusivity and semantic coherence",
+       subtitle = "Models with fewer topics have higher semantic coherence for more topics, but lower exclusivity")
+
+
+topic_model <- k_resultat %>% 
+  filter(K == 100) 
+#%>% 
+ # pull(topic_model) %>% 
+  #.[[1]]
+
+topic_model
+
+SELMODEL <- selectModel(documents, vocab, K = 100, init.type = "LDA", seed = 12345, max.em.its = 5)
+SELMODEL
+plotModels(SELMODEL)
+
+
+
+MS1 <- SELMODEL$runout[[1]]
+topicQuality(model=MS1, documents=documents)
+MS1_evalheldout<-eval.heldout(MS1, heldout$missing)
+hist(MS1_evalheldout$doc.heldout)
+MS1_evalheldout
+
+MS2 <- SELMODEL$runout[[2]]
+topicQuality(model=MS2, documents=documents)
+MS2_evalheldout<-eval.heldout(MS2, heldout$missing)
+hist(MS2_evalheldout$doc.heldout)
+MS2_evalheldout
+
+MS3 <- SELMODEL$runout[[3]]
+topicQuality(model=MS3, documents=documents)
+MS3_evalheldout<-eval.heldout(MS3, heldout$missing)
+hist(MS3_evalheldout$doc.heldout)
+MS3_evalheldout
+
+MS4 <- SELMODEL$runout[[4]]
+topicQuality(model=MS4, documents=documents)
+MS4_evalheldout<-eval.heldout(MS4, heldout$missing)
+hist(MS4_evalheldout$doc.heldout)
+MS4_evalheldout
+
+MS5 <- SELMODEL$runout[[5]]
+topicQuality(model=MS5, documents=documents)
+MS5_evalheldout<-eval.heldout(MS5, heldout$missing)
+hist(MS5_evalheldout$doc.heldout)
+MS5_evalheldout
+
+MS6 <- SELMODEL$runout[[6]]
+topicQuality(model=MS6, documents=documents)
+MS6_evalheldout<-eval.heldout(MS6, heldout$missing)
+hist(MS6_evalheldout$doc.heldout)
+MS6_evalheldout
+
+
+FINALSELECTED <- SELMODEL$runout[[2]]
+topicQuality(model=FINALSELECTED, documents=documents)
+evalheldout<-eval.heldout(FINALSELECTED, heldout$missing)
+hist(evalheldout$doc.heldout)
+evalheldout
+
+
+#save(MODELS, SELMODEL, FINALSELECTED, file = "./Documents/DATA.Rdata")
+
+#==== Summary
+## Label Topics
+labelTopics(FINALSELECTED)
+
+
+T_td_beta <- tidy(FINALSELECTED)
+
+T_td_beta
+
+T_td_gamma <- tidy(FINALSELECTED, matrix = "gamma",
+                   document_names = rownames(term_tidy_dfm))
+
+T_td_gamma
+
+
+library(ggthemes)
+
+top_terms <- T_td_beta %>%
+  arrange(beta) %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  arrange(-beta) %>%
+  select(topic, term) %>%
+  summarise(terms = list(term)) %>%
+  mutate(terms = map(terms, paste, collapse = ", ")) %>% 
+  unnest()
+
+gamma_terms <- T_td_gamma %>%
+  group_by(topic) %>%
+  summarise(gamma = mean(gamma)) %>%
+  arrange(desc(gamma)) %>%
+  left_join(top_terms, by = "topic") %>%
+  mutate(topic = paste0("Topic ", topic),
+         topic = reorder(topic, gamma))
+
+library(scales)
+
+gamma_terms %>%
+  top_n(15, gamma) %>%
+  ggplot(aes(topic, gamma, label = terms, fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(hjust = 0, nudge_y = 0.0005, size = 3) +
+  coord_flip() +
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0, 0.05),
+                     labels = percent_format()) +
+  theme_tufte(ticks = FALSE) +
+  theme(plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 13)) +
+  labs(x = NULL, y = expression(gamma),
+       title = "Top 15 topics by prevalence in the WoS corpus",
+       subtitle = "With the top words that contribute to each topic")
+
+library(knitr)
+gamma_terms %>%
+  select(topic, gamma, terms) %>%
+  kable(digits = 3, 
+        col.names = c("Topic", "Expected topic proportion", "Top 5 terms"))
+
+
+#==== Summary
+plot.STM(FINALSELECTED, type = "summary")
+plot.STM(FINALSELECTED, type = "labels", topics = c(1,2,3))
+plot.STM(FINALSELECTED, type = "perspectives", topics = c(10, 4))
+
+
+# Experiment
+
+exp <- sub_corpus[[987]]
+
+exp_df <- data.frame(exp$content)
+test_corpus <- VCorpus(VectorSource(exp_df))
+test_tidy <- tidy(test_corpus) %>%
+  unnest_tokens(word, text) %>%
+  count(id, word, sort = TRUE) %>%
+  cast_dfm(id,word,n)
+
+TT_td_gamma <- tidy(FINALSELECTED, matrix = "gamma",
+                   document_names = rownames(test_tidy))
+
+
+
+suppressWarnings(library(tidytext))# the package sometimes is not loaded correctly. If this happens, you might have to re-start the kernel 
+td_theta <- tidytext::tidy(FINALSELECTED, matrix = "theta")
+
+selectiontdthteta<-td_theta[td_theta$document%in%c(987),]#select 987. documents. be careful to select a sensible interval, as attempting to load a very huge corpus might crash the kernel
+
+thetaplot1<-ggplot(selectiontdthteta, aes(y=gamma, x=as.factor(topic), fill = as.factor(topic))) +
+  geom_bar(stat="identity",alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~ document, ncol = 3) +
+  labs(title = "Theta values per document",
+       y = expression(theta), x = "Topic")
+
+thetaplot1
+
+plot.STM(FINALSELECTED, type = "labels", topics = c(19,10,11,16))
+
